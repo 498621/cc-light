@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 cc-light.log
 cc-light.pid
+data/

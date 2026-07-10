@@ -17,6 +17,19 @@ import time
 
 # 状态文件目录：hook（可能在任意 cwd 下被调用）与 widget 都从 $HOME 推出同一路径。
 STATUS_DIR = os.path.join(os.path.expanduser("~"), ".claude", "cc-light", "status")
+# 状态变更事件目录：记录每个会话的状态转换时间线（红灯次数等 jsonl 读不到的 cc-light 独有数据）。
+# 放项目自身的 data/ 下（hook.py 所在目录），历史统计界面据此按任务区间归并红灯次数。
+EVENTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "events")
+
+
+def _record_event(session_id: str, state: str, ts: float) -> None:
+    """把一次状态变更追加到 data/events/<sid>.jsonl（失败静默，绝不影响 Claude Code）。"""
+    try:
+        os.makedirs(EVENTS_DIR, exist_ok=True)
+        with open(os.path.join(EVENTS_DIR, session_id + ".jsonl"), "a") as f:
+            f.write(json.dumps({"ts": ts, "state": state}) + "\n")
+    except Exception:
+        pass
 
 
 def _find_claude_pid() -> int:
@@ -78,8 +91,18 @@ def main() -> None:
     os.makedirs(STATUS_DIR, exist_ok=True)
     path = os.path.join(STATUS_DIR, session_id + ".json")
 
-    # 会话结束：删掉状态文件，从灯里移除该会话。
+    # 读旧状态：仅在状态真正变更时记录事件，避免每次 PreToolUse/PostToolUse 重复写 running。
+    old_state = None
+    try:
+        with open(path) as f:
+            old_state = json.load(f).get("state")
+    except Exception:
+        pass
+
+    # 会话结束：记一条 end 事件标记时间线终点，再删状态文件从灯里移除该会话。
     if state == "end":
+        if old_state != "end":
+            _record_event(session_id, "end", time.time())
         try:
             os.remove(path)
         except OSError:
@@ -100,6 +123,10 @@ def main() -> None:
     with open(tmp, "w") as f:
         json.dump(payload, f)
     os.replace(tmp, path)
+
+    # 状态变更时记录事件（供历史统计算红灯次数/停留时长）。
+    if state != old_state:
+        _record_event(session_id, state, payload["updated_at"])
 
 
 if __name__ == "__main__":

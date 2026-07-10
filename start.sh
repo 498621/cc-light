@@ -13,13 +13,15 @@ else
   PY="$(command -v python3)"
 fi
 
-# 2) 确保 rumps 可被该解释器导入。
-if ! "$PY" -c "import rumps" >/dev/null 2>&1; then
-  echo "安装 rumps ..."
-  python3 -m pip install rumps 2>/dev/null || pip3 install rumps 2>/dev/null || true
+# 2) 确保依赖可被该解释器导入（rumps 必需；WebKit/markdown 供历史会话窗口渲染 markdown）。
+if ! "$PY" -c "import rumps, WebKit, markdown" >/dev/null 2>&1; then
+  echo "安装依赖 ..."
+  python3 -m pip install -r "$DIR/requirements.txt" 2>/dev/null \
+    || pip3 install -r "$DIR/requirements.txt" 2>/dev/null || true
 fi
+# rumps 是状态灯本体的硬依赖，缺失则无法启动；WebKit/markdown 仅历史窗口用，缺失不阻断。
 if ! "$PY" -c "import rumps" >/dev/null 2>&1; then
-  echo "rumps 不可用，请先运行：pip3 install rumps" >&2
+  echo "rumps 不可用，请先运行：pip3 install -r requirements.txt" >&2
   exit 1
 fi
 

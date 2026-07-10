@@ -253,6 +253,9 @@ class CCLight(rumps.App):
         auto.state = 1 if _autostart_enabled() else 0
         self.menu.add(auto)
         self.menu.add(None)  # 分隔线
+        self.menu.add(rumps.MenuItem("历史会话管理…", callback=self._open_history))
+        self.menu.add(rumps.MenuItem("用量统计…", callback=self._open_usage))
+        self.menu.add(None)  # 分隔线
         self.menu.add(rumps.MenuItem("退出 cc-light", callback=rumps.quit_application))
 
     def _toggle_expanded(self, sender) -> None:
@@ -260,6 +263,31 @@ class CCLight(rumps.App):
         self._expanded = not self._expanded
         sender.state = 1 if self._expanded else 0
         _save_expanded(self._expanded)
+
+    def _open_history(self, _sender=None) -> None:
+        """打开历史会话管理窗口（惰性导入，出错不影响状态灯）。控制器存在实例上防止被回收。
+
+        异常打印到 stderr —— start.sh 把它重定向到 cc-light.log，便于排查问题。
+        """
+        try:
+            if getattr(self, "_history", None) is None:
+                import history_window
+                self._history = history_window.HistoryController.alloc().init()
+            self._history.show()
+        except Exception:
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+
+    def _open_usage(self, _sender=None) -> None:
+        """打开用量统计窗口（惰性导入，出错记入日志不影响状态灯）。"""
+        try:
+            if getattr(self, "_usage", None) is None:
+                import usage_window
+                self._usage = usage_window.UsageController.alloc().init()
+            self._usage.show()
+        except Exception:
+            import traceback
+            traceback.print_exc(file=sys.stderr)
 
     def _toggle_autostart(self, sender) -> None:
         """开/关开机自启，勾选态按实际结果回读（写失败也不会显示成功）。"""
