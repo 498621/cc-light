@@ -54,6 +54,16 @@ class CCLight(rumps.App):
     def __init__(self) -> None:
         # quit_button=None：自己在下拉里加「退出」，以便把它排在会话列表下方。
         super().__init__("⚪", quit_button=None)
+        # 设成 accessory：只在菜单栏显示圆点，不在 Dock 出现、也不进 Cmd+Tab 切换器。
+        # rumps 自身不设激活策略，这里设的会生效；包裹 try 防止个别环境导入失败影响启动。
+        try:
+            import AppKit
+
+            AppKit.NSApplication.sharedApplication().setActivationPolicy_(
+                AppKit.NSApplicationActivationPolicyAccessory
+            )
+        except Exception:
+            pass
         self._sig = None  # 上一次菜单内容签名，内容没变就不重建下拉（避免打开菜单时闪烁）
         self._render([], time.time())
 
