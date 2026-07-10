@@ -25,8 +25,9 @@ from AppKit import (
     NSMiniaturizableWindowMask, NSPasteboard, NSPasteboardTypeString,
     NSResizableWindowMask, NSRunningApplication, NSScrollView,
     NSScrollerStyleLegacy, NSSearchField, NSTableColumn, NSTableView,
-    NSTableViewUniformColumnAutoresizingStyle, NSTextAlignmentLeft,
-    NSTextAlignmentRight, NSTextField, NSTextView, NSTitledWindowMask,
+    NSTableViewUniformColumnAutoresizingStyle, NSTextAlignmentCenter,
+    NSTextAlignmentLeft, NSTextAlignmentRight, NSTextField, NSTextView,
+    NSTitledWindowMask,
     NSUnderlineStyleSingle, NSUnderlineStyleAttributeName, NSView,
     NSViewHeightSizable, NSViewMinXMargin, NSViewMinYMargin, NSViewWidthSizable,
     NSWindow,
@@ -36,16 +37,18 @@ from WebKit import WKWebView
 
 import stats
 
-MAIN_W, MAIN_H = 1040, 680
-DETAIL_W, DETAIL_H = 900, 760
+MAIN_W, MAIN_H = 1580, 840  # 三栏（会话 | 概览+任务 | 详情）需要更宽
+SIDE_W = 300              # 左：会话列表宽
+MID_W = 600               # 中：概览 + 任务表宽
+DETAIL_W = 700            # 右：详情区参考宽（实际随窗口缩放）
 ROW_SESSION = 60          # 会话行高（容纳路径/session_id/时间三行）
-OVER_H = 150              # 右上概览区高度
-INFO_H = 84               # 详情窗「任务信息」内容固定高度（三行，不随窗口变化）
+OVER_H = 150              # 概览区高度
+INFO_H = 84               # 详情「任务信息」内容固定高度（三行，不随窗口变化）
 MID_RATIO = 0.22          # 「改动文件」「提交内容」各占中部可用高度的比例，其余归返回内容
 
 # 任务记录表列：(标识, 表头, 宽度)
 TASK_COLS = [
-    ("idx", "#", 34), ("prompt", "提交摘要", 300), ("dur", "耗时", 72),
+    ("idx", "#", 34), ("prompt", "提交摘要 (单击在右侧看详情)", 300), ("dur", "耗时", 72),
     ("out", "输出tok", 78), ("tools", "工具", 60), ("reds", "红灯", 46),
     ("time", "时间", 120),
 ]
@@ -254,9 +257,9 @@ class HistoryController(NSObject):
         self._pending_win = None  # 待激活的窗口
         self._activate_tries = 0  # 激活重试计数
         # 详情窗相关引用
-        self.detail_win = None
-        self.detail_box = None
-        self.detail_row = 0
+        self.detail_panel = None  # 右侧内嵌详情栏
+        self.detail_ph = None     # 空状态占位 label
+        self.detail_row = -1
         self.di_view = None      # 任务信息 dashboard
         self.df_tv = self.ds_tv = None
         self.df_scroll = self.ds_scroll = None
@@ -306,8 +309,8 @@ class HistoryController(NSObject):
                 NSApplicationActivationPolicyAccessory)
 
     def windowDidResize_(self, note):
-        if note.object() is self.detail_win and self.detail_box is not None:
-            self._layout_detail(self.detail_box.bounds().size)
+        if note.object() is self.win and self.detail_panel is not None:
+            self._layout_detail(self.detail_panel.bounds().size)
 
     # ---- 主窗口 ----
     @objc.python_method
@@ -325,57 +328,59 @@ class HistoryController(NSObject):
         win.setReleasedWhenClosed_(False)
         win.center()
 
-        side_w = 300
-        right_w = MAIN_W - side_w
-
-        # 左：搜索框 + 会话列表（无表头、legacy 滚动条不遮右对齐时间）。
+        # 左栏：搜索框 + 会话列表（宽固定贴左，高随窗）。
         sf_h = 30
         self.search_field = NSSearchField.alloc().initWithFrame_(
-            NSMakeRect(6, MAIN_H - sf_h + 2, side_w - 12, sf_h - 8))
+            NSMakeRect(6, MAIN_H - sf_h + 2, SIDE_W - 12, sf_h - 8))
         self.search_field.setDelegate_(self)
         self.search_field.setPlaceholderString_("搜索项目 / 路径 / session")
         self.search_field.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
-        self.session_table = _make_table([("s", "会话", side_w)], header=False)
+        self.session_table = _make_table([("s", "会话", SIDE_W)], header=False)
         self.session_table.setRowHeight_(ROW_SESSION)
         self.session_table.setDataSource_(self)
         self.session_table.setDelegate_(self)
         self.session_table.setTarget_(self)
         self.session_table.setAction_("onSessionClick:")
         sess_scroll = _scroll(self.session_table, legacy=True)
-        sess_scroll.setFrame_(NSMakeRect(0, 0, side_w, MAIN_H - sf_h))
+        sess_scroll.setFrame_(NSMakeRect(0, 0, SIDE_W, MAIN_H - sf_h))
         sess_scroll.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
-        left = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, side_w, MAIN_H))
+        left = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, SIDE_W, MAIN_H))
         left.setAutoresizingMask_(NSViewHeightSizable)
         left.addSubview_(self.search_field)
         left.addSubview_(sess_scroll)
 
-        container = NSView.alloc().initWithFrame_(NSMakeRect(side_w, 0, right_w, MAIN_H))
-        container.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
-
-        # 右上：概览（dashboard 布局）。
-        overview = self._build_overview(right_w)
-        overview.setFrame_(NSMakeRect(0, MAIN_H - OVER_H, right_w, OVER_H))
+        # 中栏：概览（顶）+ 任务表（下）。宽固定，高随窗。
+        mid = NSView.alloc().initWithFrame_(NSMakeRect(SIDE_W, 0, MID_W, MAIN_H))
+        mid.setAutoresizingMask_(NSViewHeightSizable)
+        overview = self._build_overview(MID_W)
+        overview.setFrame_(NSMakeRect(0, MAIN_H - OVER_H, MID_W, OVER_H))
         overview.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
-
-        # 右下：任务记录表（双击弹详情）。
         self.task_table = _make_table(TASK_COLS)
         self.task_table.setDataSource_(self)
         self.task_table.setDelegate_(self)
         self.task_table.setTarget_(self)
-        self.task_table.setDoubleAction_("onTaskDouble:")
+        self.task_table.setAction_("onTaskClick:")   # 单击即在右栏显示详情
         task_scroll = _scroll(self.task_table, horiz=True)
-        task_scroll.setFrame_(NSMakeRect(0, 0, right_w, MAIN_H - OVER_H))
+        task_scroll.setFrame_(NSMakeRect(0, 0, MID_W, MAIN_H - OVER_H))
         task_scroll.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+        mid.addSubview_(overview)
+        mid.addSubview_(task_scroll)
 
-        container.addSubview_(overview)
-        container.addSubview_(task_scroll)
+        # 右栏：内嵌详情（宽高随窗伸缩，占剩余宽度）。
+        detail_w = MAIN_W - SIDE_W - MID_W
+        self.detail_panel = self._build_detail_panel()
+        self.detail_panel.setFrame_(NSMakeRect(SIDE_W + MID_W, 0, detail_w, MAIN_H))
+        self.detail_panel.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
 
         content = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, MAIN_W, MAIN_H))
         content.addSubview_(left)
-        content.addSubview_(container)
+        content.addSubview_(mid)
+        content.addSubview_(self.detail_panel)
         win.setContentView_(content)
         win.setDelegate_(self)
         self.win = win
+        self._layout_detail(self.detail_panel.bounds().size)
+        self._clear_detail()          # 默认右栏空
         self._reload_sessions()
         self._front(win)
 
@@ -393,11 +398,11 @@ class HistoryController(NSObject):
         self.ov["copy_btn"] = copy_btn
         kpis = [("tasks", "任务数"), ("dur", "总耗时"), ("out", "输出 Token"), ("reds", "红灯合计")]
         for i, (key, name) in enumerate(kpis):
-            x = 24 + i * 168
-            val = _label("—", 20, NSColor.labelColor(), NSTextAlignmentLeft, bold=True)
-            val.setFrame_(NSMakeRect(x, OVER_H - 56, 160, 26))
+            x = 18 + i * 138
+            val = _label("—", 19, NSColor.labelColor(), NSTextAlignmentLeft, bold=True)
+            val.setFrame_(NSMakeRect(x, OVER_H - 56, 132, 26))
             name_lbl = _label(name, 10, gray, NSTextAlignmentLeft)
-            name_lbl.setFrame_(NSMakeRect(x, OVER_H - 72, 160, 14))
+            name_lbl.setFrame_(NSMakeRect(x, OVER_H - 72, 132, 14))
             v.addSubview_(val)
             v.addSubview_(name_lbl)
             self.ov[key] = val
@@ -458,6 +463,7 @@ class HistoryController(NSObject):
         else:  # 无匹配：右侧清空
             self.summary, self.tasks = None, []
         self.task_table.reloadData()
+        self._clear_detail()          # 换会话列表 → 详情栏清空
 
     def controlTextDidChange_(self, note):
         if note.object() is self.search_field:
@@ -538,11 +544,12 @@ class HistoryController(NSObject):
         self._load_summary(row)
         self._update_overview()
         self.task_table.reloadData()
+        self._clear_detail()          # 切会话 → 右栏详情清空
 
-    def onTaskDouble_(self, sender):
+    def onTaskClick_(self, sender):
         row = self.task_table.clickedRow()
         if 0 <= row < len(self.tasks):
-            self._show_detail(self.tasks[row], row)
+            self._fill_detail(row)
 
     def onCopySession_(self, sender):
         """复制 `claude --resume <id>` 到剪贴板，可到终端直接粘贴继续该会话。"""
@@ -560,25 +567,10 @@ class HistoryController(NSObject):
         if btn is not None:
             btn.setTitle_("复制会话命令")
 
-    # ---- 详情二级窗口（三分区 + 上/下一条）----
+    # ---- 右栏内嵌详情（三分区 + 上/下一条）----
     @objc.python_method
-    def _show_detail(self, t, row):
-        if self.detail_win is None:
-            self._build_detail()
-        self._fill_detail(row)
-        self._layout_detail(self.detail_box.bounds().size)
-        self._front(self.detail_win)
-
-    @objc.python_method
-    def _build_detail(self):
-        style = (NSTitledWindowMask | NSClosableWindowMask
-                 | NSResizableWindowMask | NSMiniaturizableWindowMask)
-        win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(0, 0, DETAIL_W, DETAIL_H), style, NSBackingStoreBuffered, False)
-        win.setReleasedWhenClosed_(False)
-        win.center()
-
-        box = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, DETAIL_W, DETAIL_H))
+    def _build_detail_panel(self):
+        panel = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, DETAIL_W, MAIN_H))
         self.di_title = _label("任务信息", 12, NSColor.secondaryLabelColor(), NSTextAlignmentLeft, bold=True)
         self.df_title = _label("", 12, NSColor.secondaryLabelColor(), NSTextAlignmentLeft)
         self.df_title.setAttributedStringValue_(_files_title_attr())
@@ -593,14 +585,24 @@ class HistoryController(NSObject):
         self.dr_web = WKWebView.alloc().initWithFrame_(NSMakeRect(0, 0, 100, 100))
         self.prev_btn = _button("上一条", "onPrev:", self)
         self.next_btn = _button("下一条", "onNext:", self)
+        self.detail_ph = _label("单击左侧任务，在此查看详情",
+                                13, NSColor.tertiaryLabelColor(), NSTextAlignmentCenter)
         for sub in (self.di_title, self.di_view, self.df_title, self.df_scroll,
                     self.ds_title, self.ds_scroll, self.dr_title, self.dr_web,
-                    self.prev_btn, self.next_btn):
-            box.addSubview_(sub)
-        win.setContentView_(box)
-        win.setDelegate_(self)
-        self.detail_win = win
-        self.detail_box = box
+                    self.prev_btn, self.next_btn, self.detail_ph):
+            panel.addSubview_(sub)
+        return panel
+
+    @objc.python_method
+    def _clear_detail(self):
+        """右栏回到空状态：隐藏所有详情控件，只显示居中占位提示。"""
+        self.detail_row = -1
+        for v in (self.di_title, self.di_view, self.df_title, self.df_scroll,
+                  self.ds_title, self.ds_scroll, self.dr_title, self.dr_web,
+                  self.prev_btn, self.next_btn):
+            v.setHidden_(True)
+        if self.detail_ph is not None:
+            self.detail_ph.setHidden_(False)
 
     @objc.python_method
     def _build_info_view(self):
@@ -634,7 +636,12 @@ class HistoryController(NSObject):
         self.detail_row = row
         t = self.tasks[row]
         u = t["usage"]
-        self.detail_win.setTitle_(f"任务 #{row + 1} 详情 · {self.summary['project']}")
+        # 从空状态切到有内容：显示详情控件、隐藏占位。
+        self.detail_ph.setHidden_(True)
+        for v in (self.di_title, self.di_view, self.df_title, self.df_scroll,
+                  self.ds_title, self.ds_scroll, self.dr_title, self.dr_web,
+                  self.prev_btn, self.next_btn):
+            v.setHidden_(False)
         # 任务信息 dashboard
         self.di_kpi["dur"].setStringValue_(_dur(t["duration"]))
         self.di_kpi["out"].setStringValue_(_tok(u.get("output_tokens", 0)))
@@ -688,6 +695,7 @@ class HistoryController(NSObject):
         """任务信息与按钮固定高；改动文件/提交各占中部 MID_RATIO；返回内容吃剩余。"""
         w, h = size.width, size.height
         gap, th, btn_h = 8, 20, 40
+        self.detail_ph.setFrame_(NSMakeRect(20, h / 2 - 12, w - 40, 24))  # 空状态占位居中
         top = h
         # 任务信息（固定高）
         self.di_title.setFrame_(NSMakeRect(10, top - th, w - 20, th - 2))
