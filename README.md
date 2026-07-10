@@ -53,9 +53,11 @@
 ## 快速开始
 
 ```bash
-# 克隆或拷贝到任意目录后，跑一次（用完整路径）：
-~/proj/cc-light/start.sh
+# 克隆或拷贝到任意目录后，跑一次（把下面换成你的实际路径）：
+/path/to/cc-light/start.sh
 ```
+
+> 放哪个目录都行——安装时 hook 会自动指向该目录下的 `hook.py`，无需固定路径。
 
 这一条命令会自动完成：
 
@@ -94,6 +96,8 @@
 - **分状态计数**：如 `🔴2 🟢1 ⚪3`，直接数清几个在等、几个在跑、几个空闲。
 
 > 空闲满 60 秒时 Claude Code 会发一条「等待输入」的系统通知，cc-light 会把它按空闲（灰）处理，不误报成红。
+
+> 会话只要 Claude 进程还开着就常驻菜单（哪怕长时间不操作），可随时点击跳转。绿灯是有心跳的活动态：若超过 120 秒无活动（如任务被 Esc 中断，Claude Code 不发结束事件），会自动降级为空闲，不会一直卡绿。
 
 ---
 
@@ -168,7 +172,7 @@ cc-light
 ## 卸载
 
 ```bash
-~/proj/cc-light/uninstall.sh
+/path/to/cc-light/uninstall.sh
 ```
 
 停止程序、关闭开机自启、移除本工具在 `~/.claude/settings.json` 里的 hooks、清掉状态文件与各 shell profile 里的

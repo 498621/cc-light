@@ -11,11 +11,13 @@ import json
 import os
 import sys
 
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # cc-light 项目根目录
+HOOK_PY = os.path.join(BASE, "hook.py")                             # hook.py 真实绝对路径
 SETTINGS = os.path.expanduser("~/.claude/settings.json")
-HOOKS_SRC = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.hooks.json"
-)
-MARK = "cc-light/hook.py"  # 识别本工具 hook 的标记
+HOOKS_SRC = os.path.join(BASE, "settings.hooks.json")
+PLACEHOLDER = "__CC_LIGHT_HOOK__"  # 模板里的占位符，安装时替换为 HOOK_PY，故项目放哪都能用
+# 识别本工具 hook：新装用真实绝对路径；旧装写死过 $HOME/proj/cc-light，用通用子串兼容以便升级清理。
+MARKS = (HOOK_PY, "cc-light/hook.py")
 
 
 def _load(path, default):
@@ -27,7 +29,9 @@ def _load(path, default):
 
 
 def _is_ours(group):
-    return any(MARK in h.get("command", "") for h in group.get("hooks", []))
+    return any(
+        any(m in h.get("command", "") for m in MARKS) for h in group.get("hooks", [])
+    )
 
 
 def main():
@@ -43,6 +47,11 @@ def main():
 
     if action == "install":
         for event, groups in _load(HOOKS_SRC, {"hooks": {}})["hooks"].items():
+            for g in groups:
+                for h in g.get("hooks", []):
+                    if "command" in h:
+                        # 占位符替换成本机真实路径，安装到用户 settings.json
+                        h["command"] = h["command"].replace(PLACEHOLDER, HOOK_PY)
             hooks_cfg.setdefault(event, []).extend(groups)
 
     if hooks_cfg:

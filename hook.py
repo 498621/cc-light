@@ -11,11 +11,44 @@
 
 import json
 import os
+import subprocess
 import sys
 import time
 
 # 状态文件目录：hook（可能在任意 cwd 下被调用）与 widget 都从 $HOME 推出同一路径。
 STATUS_DIR = os.path.join(os.path.expanduser("~"), ".claude", "cc-light", "status")
+
+
+def _find_claude_pid() -> int:
+    """从当前 hook 进程沿父进程链往上找到 comm=claude 的进程 PID。
+
+    钩子是 Claude Code 的（子）子进程，往上第一个名为 claude 的进程即该会话的主进程。
+    widget 靠这个 PID 探活：只要 claude 还活着，会话就常驻菜单，与是否操作无关。
+    一次 ps 建表再走链，避免逐级 fork；找不到返回 0（widget 侧回退到旧的超时规则）。
+    """
+    try:
+        out = subprocess.check_output(["ps", "-eo", "pid=,ppid=,comm="], text=True)
+    except Exception:
+        return 0
+    parent, comm = {}, {}
+    for line in out.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        parent[pid] = ppid
+        comm[pid] = parts[2]
+    pid = os.getpid()
+    for _ in range(30):  # 上限 30 层，纯防环
+        if os.path.basename(comm.get(pid, "")) == "claude":
+            return pid
+        pid = parent.get(pid, 0)
+        if pid <= 1:
+            break
+    return 0
 
 
 def main() -> None:
@@ -59,6 +92,7 @@ def main() -> None:
         "cwd": cwd,
         "message": message,
         "iterm_id": iterm_id,
+        "claude_pid": _find_claude_pid(),  # 主进程 PID：widget 靠它探活，开着不操作也不会被移除
         "updated_at": time.time(),
     }
     # 先写临时文件再原子 rename，避免 widget 读到写了一半的 JSON。

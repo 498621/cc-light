@@ -25,7 +25,8 @@ import rumps
 STATUS_DIR = os.path.join(os.path.expanduser("~"), ".claude", "cc-light", "status")
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude", "cc-light", "config.json")
 POLL_INTERVAL = 0.25     # 轮询间隔（秒）：比原版 500ms 更跟手，变色更及时
-STALE_DROP = 30 * 60     # 超过 30 分钟未更新的会话视为僵死（未正常收到 SessionEnd），从灯里移除
+STALE_DROP = 30 * 60     # 无 claude_pid 的旧文件才用的兜底：超 30 分钟未更新视为僵死，从灯里移除
+RUNNING_STALE = 120      # running 心跳过期：绿灯超 120s 没刷新视为卡态（ESC 中断等无收尾事件），降级为 idle
 
 # 三态：工作中(绿)、等待中(红)、空闲(灰)。数字为优先级（大=高），合并成单灯时取最高。
 GLYPH = {"needs": "🔴", "running": "🟢", "idle": "⚪"}
@@ -120,10 +121,33 @@ def _format_title(counts: dict) -> str:
     return " ".join(parts) if parts else "⚪"
 
 
+def _pid_alive(pid: int) -> bool:
+    """探活：进程存在返回 True。跨用户等权限错误也按存活处理（进程确实在）。"""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
 def _effective_state(entry: dict, now: float) -> str:
-    """返回会话状态；未知/历史状态（如旧的 done）一律按空闲处理。"""
+    """返回会话状态；未知/历史状态（如旧的 done）一律按空闲处理。
+
+    running 是有心跳的活动态：真在跑时 PreToolUse 会持续刷新 updated_at；
+    ESC 中断等无收尾事件的情形会把绿灯冻结，故超 RUNNING_STALE 未刷新即降级为 idle。
+    """
     st = entry.get("state", "idle")
-    return st if st in PRIORITY else "idle"
+    if st not in PRIORITY:
+        return "idle"
+    if st == "running" and now - entry.get("updated_at", 0) > RUNNING_STALE:
+        return "idle"
+    return st
 
 
 def _read_sessions():
@@ -135,8 +159,18 @@ def _read_sessions():
                 e = json.load(f)
         except Exception:
             continue  # 半截/损坏文件下一轮再读
-        if now - e.get("updated_at", 0) > STALE_DROP:
-            continue  # 僵死会话不显示
+        pid = e.get("claude_pid", 0)
+        if pid:
+            # 有主进程 PID：以进程存活为准——只要开着就常驻，与多久没操作无关。
+            # 进程已死（哪怕没正常收到 SessionEnd）则移除，并顺手清掉残留状态文件。
+            if not _pid_alive(pid):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+                continue
+        elif now - e.get("updated_at", 0) > STALE_DROP:
+            continue  # 无 PID 的旧文件：回退到 30 分钟超时兜底
         out.append(e)
     return out, now
 

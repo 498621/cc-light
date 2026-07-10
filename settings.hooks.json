@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" idle"
+            "command": "/usr/bin/python3 \"__CC_LIGHT_HOOK__\" idle"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" running"
+            "command": "/usr/bin/python3 \"__CC_LIGHT_HOOK__\" running"
           }
         ]
       }
@@ -26,7 +26,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" running"
+            "command": "/usr/bin/python3 \"__CC_LIGHT_HOOK__\" running"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"__CC_LIGHT_HOOK__\" running"
           }
         ]
       }
@@ -36,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" needs"
+            "command": "/usr/bin/python3 \"__CC_LIGHT_HOOK__\" needs"
           }
         ]
       }
@@ -46,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" idle"
+            "command": "/usr/bin/python3 \"__CC_LIGHT_HOOK__\" idle"
           }
         ]
       }
@@ -56,7 +67,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" end"
+            "command": "/usr/bin/python3 \"__CC_LIGHT_HOOK__\" end"
           }
         ]
       }
