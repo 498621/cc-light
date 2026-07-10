@@ -30,6 +30,10 @@ def main() -> None:
     session_id = str(data.get("session_id") or "unknown")
     cwd = data.get("cwd") or ""
     message = data.get("message") or ""
+    # iTerm2 会话 id：环境变量形如 "w0t1p3:GUID"，取冒号后的 GUID，供菜单点击时跳回对应 tab。
+    # 钩子作为 Claude Code 子进程运行，继承了它所在 iTerm pane 的这个变量；非 iTerm 环境则为空。
+    iterm_full = os.environ.get("ITERM_SESSION_ID", "")
+    iterm_id = iterm_full.split(":")[-1] if iterm_full else ""
 
     os.makedirs(STATUS_DIR, exist_ok=True)
     path = os.path.join(STATUS_DIR, session_id + ".json")
@@ -47,6 +51,7 @@ def main() -> None:
         "state": state,
         "cwd": cwd,
         "message": message,
+        "iterm_id": iterm_id,
         "updated_at": time.time(),
     }
     # 先写临时文件再原子 rename，避免 widget 读到写了一半的 JSON。
