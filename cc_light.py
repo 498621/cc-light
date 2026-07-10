@@ -29,6 +29,19 @@ LABEL = {"needs": "等待确认", "running": "运行中", "done": "已完成", "
 PRIORITY = {"needs": 3, "running": 2, "done": 1, "idle": 0}
 
 
+# 菜单栏标题里各状态的展示顺序（卡住 > 工作 > 刚完成 > 空闲）。
+TITLE_ORDER = ("needs", "running", "done", "idle")
+
+
+def _format_title(counts: dict) -> str:
+    """把各状态数量拼成菜单栏文字，如 "🔴2 🟡1 ⚪3"；数量为 0 的状态不显示。
+
+    多会话时一眼看清「几个卡住、几个在跑、几个空闲」，无需点开下拉。
+    """
+    parts = [f"{GLYPH[st]}{counts[st]}" for st in TITLE_ORDER if counts.get(st)]
+    return " ".join(parts) if parts else "⚪"
+
+
 def _effective_state(entry: dict, now: float) -> str:
     """done 满 DONE_TTL 秒后视为 idle（绿灯自动熄），其余按记录的状态。"""
     st = entry.get("state", "idle")
@@ -73,13 +86,11 @@ class CCLight(rumps.App):
     def refresh(self, _sender) -> None:
         sessions, now = _read_sessions()
 
-        # 聚合图标：取所有会话里优先级最高的状态。菜单栏文字每轮都更新（廉价、不闪烁）。
-        agg = "idle"
+        # 菜单栏标题：显示各状态的会话数量（如 "🔴2 🟡1 ⚪3"）。每轮都更新，廉价、不闪烁。
+        counts = {"needs": 0, "running": 0, "done": 0, "idle": 0}
         for e in sessions:
-            st = _effective_state(e, now)
-            if PRIORITY[st] > PRIORITY[agg]:
-                agg = st
-        self.title = GLYPH[agg]
+            counts[_effective_state(e, now)] += 1
+        self.title = _format_title(counts)
 
         # 下拉内容仅在「有会话状态变化」时才重建，避免菜单打开时被每 500ms 的重建打断。
         sig = tuple(
