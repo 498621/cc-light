@@ -26,19 +26,32 @@ fi
 # 3) 幂等配置 Claude Code hooks（合并进 ~/.claude/settings.json，不动其它配置）。
 python3 "$DIR/scripts/install_hooks.py" install
 
-# 4) 把 alias cc-light 写入 shell profile（幂等；只在缺失时追加）。
-case "${SHELL:-}" in
-  *zsh) PROFILE="$HOME/.zshrc" ;;
-  *bash) PROFILE="$HOME/.bash_profile" ;;
-  *) PROFILE="$HOME/.zshrc" ;;
+# 4) 把 alias cc-light 写入「当前用户实际使用的 shell」的 profile（幂等；只在缺失时追加）。
+#    按登录 shell（$SHELL）识别，覆盖 zsh / bash / fish，其它 shell 兜底到 POSIX ~/.profile。
+#    alias name="value" 的写法在 zsh/bash/fish 通用，故仅需按 shell 选对配置文件。
+case "$(basename "${SHELL:-sh}")" in
+  zsh)
+    PROFILE="${ZDOTDIR:-$HOME}/.zshrc"
+    ;;
+  bash)
+    # macOS 的终端起的是 login shell 读 .bash_profile；Linux 交互 shell 一般读 .bashrc。
+    if [ "$(uname)" = "Darwin" ]; then PROFILE="$HOME/.bash_profile"; else PROFILE="$HOME/.bashrc"; fi
+    ;;
+  fish)
+    PROFILE="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+    ;;
+  *)
+    PROFILE="$HOME/.profile"
+    ;;
 esac
+mkdir -p "$(dirname "$PROFILE")"  # fish 的 ~/.config/fish 可能尚不存在
 if ! grep -qF "alias cc-light=" "$PROFILE" 2>/dev/null; then
   {
     echo ""
     echo "# cc-light 菜单栏状态灯"
     echo "alias cc-light=\"$DIR/start.sh\""
   } >>"$PROFILE"
-  echo "已写入 alias 到 $PROFILE —— 新开终端后可直接输入 cc-light 启动。"
+  echo "已写入 alias 到 $PROFILE（当前 shell: $(basename "${SHELL:-sh}")）—— 新开终端后可直接输入 cc-light 启动。"
 fi
 
 # 5) 启动（已在运行则不重复；cc_light.py 自身也有单实例锁兜底）。

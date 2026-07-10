@@ -14,10 +14,15 @@ rm -f "$PLIST"
 # 只移除本工具的 hooks，保留用户其它配置。
 python3 "$DIR/scripts/install_hooks.py" remove || true
 
-# 移除 profile 里的 alias 行（zsh / bash 都扫一遍）。
-for PROFILE in "$HOME/.zshrc" "$HOME/.bash_profile"; do
+# 移除 profile 里的 alias 行（zsh / bash / fish / 通用都扫一遍）。
+for PROFILE in \
+  "${ZDOTDIR:-$HOME}/.zshrc" \
+  "$HOME/.bash_profile" \
+  "$HOME/.bashrc" \
+  "$HOME/.profile" \
+  "${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"; do
   [ -f "$PROFILE" ] || continue
-  # 删掉 alias 行及其上一行的注释标题。
+  # 删掉 alias 行及其上一行的注释标题（macOS BSD sed 语法）。
   sed -i '' '/# cc-light 菜单栏状态灯/d; /alias cc-light=/d' "$PROFILE" 2>/dev/null || true
 done
 
