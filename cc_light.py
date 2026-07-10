@@ -11,11 +11,13 @@
 用 pythonw 启动（见 start.sh 与 README）。
 """
 
+import fcntl
 import functools
 import glob
 import json
 import os
 import subprocess
+import sys
 import time
 
 import rumps
@@ -50,6 +52,63 @@ def _save_expanded(expanded: bool) -> None:
             json.dump({"expanded": expanded}, f)
     except Exception:
         pass
+
+
+# 注意：不要叫 LABEL —— 那是上面的状态标签字典，别覆盖它。
+AGENT_LABEL = "com.cc-light"
+LAUNCH_AGENT_PATH = os.path.expanduser(f"~/Library/LaunchAgents/{AGENT_LABEL}.plist")
+LOCK_PATH = os.path.join(os.path.expanduser("~"), ".claude", "cc-light", ".lock")
+LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cc-light.log")
+
+_lock_fh = None  # 单实例文件锁句柄，进程存活期间一直持有（关闭即释放锁）
+
+
+def _acquire_single_instance() -> bool:
+    """抢占单实例锁：已有实例在跑则返回 False（新进程应直接退出，避免两个菜单栏图标）。"""
+    global _lock_fh
+    try:
+        os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
+        _lock_fh = open(LOCK_PATH, "w")
+        fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _autostart_enabled() -> bool:
+    return os.path.exists(LAUNCH_AGENT_PATH)
+
+
+def _set_autostart(enable: bool) -> None:
+    """开/关开机自启：只增删 LaunchAgent plist 文件，不 load/unload，故绝不影响当前正在跑的灯。
+    下次登录由 launchd 按此文件决定是否自启（单实例锁保证不会和手动启动的重复）。
+    """
+    if enable:
+        # sys.executable 即当前解释器（经 pythonw 启动时为 framework python，菜单栏可正常显示）。
+        plist = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<plist version="1.0"><dict>\n'
+            f"  <key>Label</key><string>{AGENT_LABEL}</string>\n"
+            "  <key>ProgramArguments</key><array>\n"
+            f"    <string>{sys.executable}</string><string>{os.path.abspath(__file__)}</string>\n"
+            "  </array>\n"
+            "  <key>RunAtLoad</key><true/>\n"
+            "  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n"
+            f"  <key>StandardOutPath</key><string>{LOG_PATH}</string>\n"
+            f"  <key>StandardErrorPath</key><string>{LOG_PATH}</string>\n"
+            "</dict></plist>\n"
+        )
+        try:
+            os.makedirs(os.path.dirname(LAUNCH_AGENT_PATH), exist_ok=True)
+            with open(LAUNCH_AGENT_PATH, "w") as f:
+                f.write(plist)
+        except OSError:
+            pass
+    else:
+        try:
+            os.remove(LAUNCH_AGENT_PATH)
+        except OSError:
+            pass
 
 
 def _format_title(counts: dict) -> str:
@@ -155,6 +214,10 @@ class CCLight(rumps.App):
         toggle = rumps.MenuItem("菜单栏分状态计数（不勾选则合并为一个灯）", callback=self._toggle_expanded)
         toggle.state = 1 if self._expanded else 0
         self.menu.add(toggle)
+        # 开机自启：勾选=写入 LaunchAgent（下次登录自动启动）；取消=删除。不影响当前正在跑的灯。
+        auto = rumps.MenuItem("开机自启动（下次登录生效）", callback=self._toggle_autostart)
+        auto.state = 1 if _autostart_enabled() else 0
+        self.menu.add(auto)
         self.menu.add(None)  # 分隔线
         self.menu.add(rumps.MenuItem("退出 cc-light", callback=rumps.quit_application))
 
@@ -163,6 +226,11 @@ class CCLight(rumps.App):
         self._expanded = not self._expanded
         sender.state = 1 if self._expanded else 0
         _save_expanded(self._expanded)
+
+    def _toggle_autostart(self, sender) -> None:
+        """开/关开机自启，勾选态按实际结果回读（写失败也不会显示成功）。"""
+        _set_autostart(not _autostart_enabled())
+        sender.state = 1 if _autostart_enabled() else 0
 
     def _jump(self, iterm_id: str, _sender=None) -> None:
         """点击会话菜单项：把 iTerm2 前置并选中该会话所在的 tab。"""
@@ -189,4 +257,7 @@ class CCLight(rumps.App):
 
 
 if __name__ == "__main__":
+    # 单实例：已有一个灯在跑（手动或开机自启）就直接退出，避免菜单栏出现两个图标。
+    if not _acquire_single_instance():
+        sys.exit(0)
     CCLight().run()

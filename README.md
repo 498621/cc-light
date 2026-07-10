@@ -34,32 +34,36 @@ Claude Code 的 Mac 菜单栏状态灯。灵感来自 Windows 版 [claude-code-t
 - 钩子用系统 `/usr/bin/python3` 跑（只用标准库，与 Anaconda / PATH 解耦，绝不阻断 Claude Code）；
   菜单栏程序需要 rumps。
 
-## 安装（一键）
+## 安装 / 启动
+
+首次运行（用完整路径跑一次）：
 
 ```bash
-cd ~/proj/cc-light
-./install.sh
+~/proj/cc-light/start.sh
 ```
 
-`install.sh` 会自动：装 rumps 依赖、把 hooks 幂等合并进 `~/.claude/settings.json`、生成并加载
-一个 LaunchAgent（开机自启、崩溃自愈、装完立即启动）。装完菜单栏右上角就有圆点，之后再也不用手动
-启动。改了代码后**再跑一次 `./install.sh`** 即可重启用上新代码。
+`start.sh` 会自动：装 rumps 依赖、把 hooks 幂等合并进 `~/.claude/settings.json`、把
+`alias cc-light="…/start.sh"` 写进你的 shell profile，然后启动菜单栏灯。之后**新开终端直接输入
+`cc-light` 即可启动**（不用再进目录）。
 
-> 分享给他人：把本目录拷过去 / clone，对方 `./install.sh` 即可（路径按其本机自动解析）。
+> 分享给他人：把本目录拷过去 / clone，对方跑一次 `start.sh` 即可（路径按其本机自动解析）。
 > 新增或改动 hooks 后，需重启对应的 Claude Code 会话才生效。
 
 ## 日常操作
 
-- 临时退出：点菜单栏圆点 →「退出 cc-light」（干净退出，不会被自愈拉起）。
-- 退出后再启动 / 改代码后重启：`./install.sh`。
-- 卸载：`./uninstall.sh`（停止、移除自启、清掉本工具的 hooks 与状态文件，保留你其它配置）。
+- 启动：`cc-light`（首次装好 alias 后，任意终端可用）。
+- 退出：点菜单栏圆点 →「退出 cc-light」。
+- 开机自启：点菜单栏圆点 → 勾选「开机自启动」（下次登录生效；取消勾选即关闭，不影响当前正在跑的灯）。
+- 卸载：`./uninstall.sh`（停止、关自启、清 hooks / 状态 / profile 里的 alias，保留你其它配置）。
+
+单实例锁保证同时只有一个灯：手动启动与开机自启不会叠成两个图标。
 
 ## 菜单栏不显示图标怎么办
 
-Anaconda 等非 framework 版 Python 跑菜单栏程序，有时图标不出现。装上 GUI 启动器再重装即可
-（`install.sh` 会自动优先用 `pythonw`）：
+Anaconda 等非 framework 版 Python 跑菜单栏程序，有时图标不出现。装上 GUI 启动器再重启即可
+（`start.sh` 会自动优先用 `pythonw`）：
 
 ```bash
 conda install -y python.app
-./install.sh
+cc-light
 ```
