@@ -1,22 +1,65 @@
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" idle" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" idle"
+          }
+        ]
+      }
     ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" running" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" running"
+          }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "matcher": "*", "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" running" } ] }
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" running"
+          }
+        ]
+      }
     ],
     "Notification": [
-      { "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" needs" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" needs"
+          }
+        ]
+      }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" done" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" idle"
+          }
+        ]
+      }
     ],
     "SessionEnd": [
-      { "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" end" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" end"
+          }
+        ]
+      }
     ]
   }
 }

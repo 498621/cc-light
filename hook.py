@@ -30,6 +30,13 @@ def main() -> None:
     session_id = str(data.get("session_id") or "unknown")
     cwd = data.get("cwd") or ""
     message = data.get("message") or ""
+
+    # Notification 既用于「需要权限/被提问」（红），也用于「空闲 60s 提醒」。后者按空闲(灰)处理，
+    # 以贴合「空闲=灰、红=有问题等待」。靠 message 文案区分（启发式：文案改了会退回红，不影响功能安全）。
+    if state == "needs":
+        low = message.lower()
+        if "waiting" in low and "input" in low:
+            state = "idle"
     # iTerm2 会话 id：环境变量形如 "w0t1p3:GUID"，取冒号后的 GUID，供菜单点击时跳回对应 tab。
     # 钩子作为 Claude Code 子进程运行，继承了它所在 iTerm pane 的这个变量；非 iTerm 环境则为空。
     iterm_full = os.environ.get("ITERM_SESSION_ID", "")
