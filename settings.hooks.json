@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" idle" } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" running" } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" running" } ] }
+    ],
+    "Notification": [
+      { "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" needs" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" done" } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "/usr/bin/python3 \"$HOME/proj/cc-light/hook.py\" end" } ] }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  可选：开机自启 cc-light 菜单栏灯。
+  用法：
+    1) 若菜单栏图标显示不出来，先 `conda install -y python.app` 得到 pythonw，
+       并把下面 ProgramArguments 第一项改成 /opt/anaconda3/bin/pythonw。
+    2) cp com.cc-light.plist ~/Library/LaunchAgents/
+    3) launchctl load ~/Library/LaunchAgents/com.cc-light.plist
+  停用：launchctl unload ~/Library/LaunchAgents/com.cc-light.plist
+  注意：LaunchAgent 直接前台运行 cc_light.py（由 launchd 托管），不要走 start.sh 的后台化。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.cc-light</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/anaconda3/bin/python3</string>
+    <string>/Users/huayuanzhen/proj/cc-light/cc_light.py</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/huayuanzhen/proj/cc-light/cc-light.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/huayuanzhen/proj/cc-light/cc-light.log</string>
+</dict>
+</plist>
