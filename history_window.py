@@ -9,7 +9,10 @@ markdown 渲染）。
 GUI 无法在无图形会话的环境运行，此模块仅在用户点击菜单时由 cc_light.py 惰性导入。
 """
 
+import json
+import os
 import re
+import subprocess
 from datetime import datetime
 
 import markdown
@@ -19,8 +22,9 @@ from AppKit import (
     NSApplication, NSApplicationActivateIgnoringOtherApps,
     NSApplicationActivationPolicyAccessory,
     NSApplicationActivationPolicyRegular, NSBackingStoreBuffered, NSBezelBorder,
-    NSBezelStyleRounded, NSButton, NSClosableWindowMask, NSColor, NSFont,
-    NSFontAttributeName, NSForegroundColorAttributeName, NSLinkAttributeName,
+    NSBackgroundColorAttributeName, NSBezelStyleRounded, NSButton,
+    NSClosableWindowMask, NSColor, NSFont, NSFontAttributeName,
+    NSForegroundColorAttributeName, NSLinkAttributeName,
     NSLineBreakByTruncatingTail, NSMakeRect, NSMakeSize, NSMenu, NSMenuItem,
     NSMiniaturizableWindowMask, NSPasteboard, NSPasteboardTypeString,
     NSResizableWindowMask, NSRunningApplication, NSScrollView,
@@ -183,13 +187,28 @@ th { background: rgba(127,127,127,.16); }
 blockquote { margin: .5em 0; padding-left: 12px; border-left: 3px solid rgba(127,127,127,.4);
              opacity: .85; }
 a { color: #0a84ff; } img { max-width: 100%; }
+mark { background: rgba(255,214,10,.55); color: inherit; font-weight: 700; border-radius: 2px; }
+"""
+
+# 命中高亮：页面加载后遍历文本节点，把 query 包进 <mark>。
+_HL_JS = """
+<script>(function(){var q=%s;if(!q)return;var ql=q.toLowerCase();
+function walk(n){if(n.nodeType===3){var t=n.data,tl=t.toLowerCase(),i=tl.indexOf(ql);
+if(i<0)return;var f=document.createDocumentFragment(),last=0;
+while(i>=0){f.appendChild(document.createTextNode(t.slice(last,i)));
+var m=document.createElement('mark');m.textContent=t.slice(i,i+q.length);f.appendChild(m);
+last=i+q.length;i=tl.indexOf(ql,last);}f.appendChild(document.createTextNode(t.slice(last)));
+n.parentNode.replaceChild(f,n);}else if(n.nodeType===1&&['SCRIPT','STYLE','MARK'].indexOf(n.nodeName)<0){
+Array.prototype.slice.call(n.childNodes).forEach(walk);}}walk(document.body);})();</script>
 """
 
 
-def _render_html(md_text):
-    """markdown → 完整 HTML（含表格/代码扩展与深浅色 CSS），供 WKWebView 渲染。"""
+def _render_html(md_text, highlight=""):
+    """markdown → 完整 HTML（含表格/代码扩展与深浅色 CSS），命中 query 处 <mark> 高亮。"""
     body = markdown.markdown(md_text or "", extensions=["tables", "fenced_code", "sane_lists"])
-    return f"<!doctype html><html><head><meta charset='utf-8'><style>{_CSS}</style></head><body>{body}</body></html>"
+    hl = _HL_JS % json.dumps(highlight) if highlight else ""
+    return (f"<!doctype html><html><head><meta charset='utf-8'><style>{_CSS}</style></head>"
+            f"<body>{body}{hl}</body></html>")
 
 
 def _button(title, sel, target):
@@ -234,6 +253,53 @@ def _files_title_attr(hint="   点击文件名可复制"):
     return ms
 
 
+def _star_attr(filled):
+    """收藏星标：实心黄★ / 中空灰☆。"""
+    ch = "★" if filled else "☆"
+    color = NSColor.systemYellowColor() if filled else NSColor.tertiaryLabelColor()
+    return _attr(ch, {NSFontAttributeName: NSFont.systemFontOfSize_(15),
+                      NSForegroundColorAttributeName: color})
+
+
+def _highlight(text, query, font):
+    """把 text 渲染成 attributed；命中 query 处加粗 + 黄色底色。query 为空则纯文本。"""
+    text = text or ""
+    ms = NSMutableAttributedString.alloc().initWithString_attributes_(
+        text, {NSFontAttributeName: font, NSForegroundColorAttributeName: NSColor.labelColor()})
+    q = (query or "").lower()
+    if not q:
+        return ms
+    bold = NSFont.boldSystemFontOfSize_(font.pointSize())
+    yellow = NSColor.systemYellowColor().colorWithAlphaComponent_(0.5)
+    low, i = text.lower(), 0
+    while True:
+        j = low.find(q, i)
+        if j < 0:
+            break
+        rng = (j, len(q))
+        ms.addAttribute_value_range_(NSBackgroundColorAttributeName, yellow, rng)
+        ms.addAttribute_value_range_(NSFontAttributeName, bold, rng)
+        i = j + len(q)
+    return ms
+
+
+def _external_activate():
+    """经 System Events 把本进程置前。
+
+    新版 macOS(14+)收紧了编程激活，accessory 应用用 activateIgnoringOtherApps 已基本失效
+    （表现为“第一次打开点不动，切窗口回来才行”）。从“外部”用 osascript 置前可模拟系统级
+    激活，绕过该限制。首次会请求控制 System Events 的权限，允许一次即可。
+    """
+    try:
+        subprocess.Popen(
+            ["osascript", "-e",
+             'tell application "System Events" to set frontmost of '
+             f"(first process whose unix id is {os.getpid()}) to true"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
 class HistoryController(NSObject):
     """主窗口控制器，兼两个表的数据源/委托、两个窗口的 window delegate。"""
 
@@ -246,6 +312,9 @@ class HistoryController(NSObject):
         self.all_paths = []      # 全部会话（搜索前）
         self.all_metas = []
         self.search_field = None
+        self.favorites = stats.load_favorites()  # 收藏的 session_id 集合
+        self.query = ""          # 当前搜索词（用于命中高亮）
+        self.fulltext = None     # {path: 全文小写}，首次全局搜索时构建
         self.cache = {}
         self.summary = None
         self.tasks = []
@@ -271,12 +340,7 @@ class HistoryController(NSObject):
     # ---- 窗口置前 / 激活策略 ----
     @objc.python_method
     def _front(self, win):
-        """提升为 Regular 策略并装主菜单，使 accessory 应用的窗口可交互、快捷键可用。
-
-        accessory→Regular 的策略切换是异步的：切换后立刻 activate 有几率在策略生效前执行，
-        窗口拿不到 key（表现为“刚打开点不动，切走再切回才行”）。故把激活延到下一个
-        runloop tick，等策略切换落地后再激活，稳定消除间歇性无响应。
-        """
+        """把窗口置前并使其可交互。切 Regular 策略 + 外部激活（osascript），兜底重试。"""
         app = NSApplication.sharedApplication()
         app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
         if self.menu is None:
@@ -284,24 +348,23 @@ class HistoryController(NSObject):
         app.setMainMenu_(self.menu)
         win.makeKeyAndOrderFront_(None)
         win.orderFrontRegardless()
-        # 策略切换是异步的、生效时机不定。用重试轮询兜底：反复激活直到窗口真正成为
-        # key window（或超时），无论系统时序如何都能激活到位，消除“刚打开点不动”。
+        app.activateIgnoringOtherApps_(True)
+        _external_activate()          # 关键：绕过新版 macOS 编程激活限制
         self._pending_win = win
         self._activate_tries = 0
-        self.performSelector_withObject_afterDelay_("_activate:", None, 0.05)
+        self.performSelector_withObject_afterDelay_("_activate:", None, 0.12)
 
     def _activate_(self, _arg):
         win = self._pending_win
-        if win is None:
+        if win is None or win.isKeyWindow():
             return
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
-        NSRunningApplication.currentApplication().activateWithOptions_(
-            NSApplicationActivateIgnoringOtherApps)
         win.makeKeyAndOrderFront_(None)
         win.orderFrontRegardless()
         self._activate_tries += 1
-        if not win.isKeyWindow() and self._activate_tries < 10:
-            self.performSelector_withObject_afterDelay_("_activate:", None, 0.1)
+        if self._activate_tries < 8:
+            _external_activate()
+            self.performSelector_withObject_afterDelay_("_activate:", None, 0.15)
 
     def windowWillClose_(self, note):
         if note.object() is self.win:  # 主窗口关闭 → 切回 accessory，隐藏 Dock 图标
@@ -437,19 +500,43 @@ class HistoryController(NSObject):
     def _reload_sessions(self):
         self.all_paths = stats.list_sessions()
         self.all_metas = [stats.quick_meta(p) for p in self.all_paths]
+        self.favorites = stats.load_favorites()
+        self.fulltext = None     # 会话集变了，全文索引失效
         self._apply_filter(self.search_field.stringValue() if self.search_field else "")
 
     @objc.python_method
+    def _ensure_fulltext(self):
+        """首次全局搜索时构建 {path: 全文小写}（prompt + 返回内容），复用会话解析缓存。"""
+        if self.fulltext is not None:
+            return
+        self.fulltext = {}
+        for p in self.all_paths:
+            try:
+                s = self.cache.get(p)
+                if s is None:
+                    s = stats.parse_session(p)
+                    self.cache[p] = s
+                parts = []
+                for t in s["tasks"]:
+                    parts.append(t["prompt"])
+                    parts.extend(t["reply"])
+                self.fulltext[p] = "\n".join(parts).lower()
+            except Exception:
+                self.fulltext[p] = ""
+
+    @objc.python_method
     def _apply_filter(self, query):
-        """按 项目名/路径/session_id 子串过滤会话列表，实时刷新。"""
-        q = (query or "").strip().lower()
+        """全局搜索：匹配 项目/路径/session_id 及任务 prompt/返回全文，实时刷新。"""
+        self.query = (query or "").strip()
+        q = self.query.lower()
         if not q:
             self.paths, self.metas = list(self.all_paths), list(self.all_metas)
         else:
+            self._ensure_fulltext()
             self.paths, self.metas = [], []
             for p, m in zip(self.all_paths, self.all_metas):
                 if (q in m["project"].lower() or q in m["session_id"].lower()
-                        or q in m["cwd"].lower()):
+                        or q in m["cwd"].lower() or q in self.fulltext.get(p, "")):
                     self.paths.append(p)
                     self.metas.append(m)
         if not self.session_table:
@@ -491,26 +578,46 @@ class HistoryController(NSObject):
     @objc.python_method
     def _session_cell(self, row):
         m = self.metas[row]
-        w, h = 300, ROW_SESSION
+        w, h = SIDE_W, ROW_SESSION
+        star_w = 26                       # 右侧留给收藏星标
+        tw = w - star_w                   # 文本区宽度
         v = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
         v.setAutoresizesSubviews_(True)
         path = _label(m["cwd"], 12.5, NSColor.labelColor(), NSTextAlignmentLeft)
-        path.setFrame_(NSMakeRect(6, h - 25, w - 12, 18))
+        path.setFrame_(NSMakeRect(3, h - 25, tw - 6, 18))
         path.setAutoresizingMask_(NSViewWidthSizable)
         sid = _label(m["session_id"], 10.5, NSColor.secondaryLabelColor(), NSTextAlignmentLeft)
-        sid.setFrame_(NSMakeRect(6, h - 44, w - 12, 16))
+        sid.setFrame_(NSMakeRect(3, h - 44, tw - 6, 16))
         sid.setAutoresizingMask_(NSViewWidthSizable)
         tm = _label(m["created"], 10, NSColor.tertiaryLabelColor(), NSTextAlignmentRight)
-        tm.setFrame_(NSMakeRect(6, 5, w - 14, 14))  # 右边距略大，避开滚动条
+        tm.setFrame_(NSMakeRect(3, 5, tw - 8, 14))   # 右对齐到星标左侧，不再被截
         tm.setAutoresizingMask_(NSViewWidthSizable)
-        for lbl in (path, sid, tm):
-            v.addSubview_(lbl)
+        star = NSButton.alloc().initWithFrame_(NSMakeRect(w - star_w, (h - 22) / 2, 22, 22))
+        star.setBordered_(False)
+        star.setAttributedTitle_(_star_attr(m["session_id"] in self.favorites))
+        star.setTarget_(self)
+        star.setAction_("onToggleFav:")
+        star.setTag_(row)
+        star.setAutoresizingMask_(NSViewMinXMargin)  # 贴右
+        for sub in (path, sid, tm, star):
+            v.addSubview_(sub)
         return v
+
+    def onToggleFav_(self, sender):
+        row = sender.tag()
+        if 0 <= row < len(self.metas):
+            sid = self.metas[row]["session_id"]
+            now = stats.toggle_favorite(sid)
+            self.favorites = stats.load_favorites()
+            sender.setAttributedTitle_(_star_attr(now))
 
     @objc.python_method
     def _task_cell(self, ident, row):
         align = NSTextAlignmentRight if ident in ("out", "tools", "reds") else NSTextAlignmentLeft
-        lbl = _label(self._task_text(ident, row), 12, NSColor.labelColor(), align)
+        text = self._task_text(ident, row)
+        lbl = _label(text, 12, NSColor.labelColor(), align)
+        if ident == "prompt" and self.query:  # 摘要列命中高亮
+            lbl.setAttributedStringValue_(_highlight(text, self.query, NSFont.systemFontOfSize_(12)))
         lbl.setFrame_(NSMakeRect(4, 3, 120, 16))
         lbl.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
         return lbl
@@ -662,10 +769,11 @@ class HistoryController(NSObject):
                 q = (a.get("input", {}).get("questions") or [{}])[0]
                 lines.append(f"· {q.get('question', '')} → {_choice(a)}")
             sub += "\n" + "\n".join(lines)
-        self.ds_tv.setString_(sub)
-        # 返回内容
+        self.ds_tv.textStorage().setAttributedString_(
+            _highlight(sub, self.query, NSFont.userFixedPitchFontOfSize_(12)))
+        # 返回内容（命中高亮）
         self.dr_web.loadHTMLString_baseURL_(
-            _render_html("\n\n".join(t["reply"]).strip() or "（无文本返回）"), None)
+            _render_html("\n\n".join(t["reply"]).strip() or "（无文本返回）", self.query), None)
         self.ds_tv.scrollRangeToVisible_((0, 0))
         self.prev_btn.setEnabled_(row > 0)               # 第一条时置灰
         self.next_btn.setEnabled_(row < len(self.tasks) - 1)  # 最后一条时置灰

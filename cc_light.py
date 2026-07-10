@@ -255,6 +255,7 @@ class CCLight(rumps.App):
         self.menu.add(None)  # 分隔线
         self.menu.add(rumps.MenuItem("历史会话管理…", callback=self._open_history))
         self.menu.add(rumps.MenuItem("用量统计…", callback=self._open_usage))
+        self.menu.add(rumps.MenuItem("Claude Code 配置编辑…", callback=self._open_config))
         self.menu.add(None)  # 分隔线
         self.menu.add(rumps.MenuItem("退出 cc-light", callback=rumps.quit_application))
 
@@ -285,6 +286,17 @@ class CCLight(rumps.App):
                 import usage_window
                 self._usage = usage_window.UsageController.alloc().init()
             self._usage.show()
+        except Exception:
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+
+    def _open_config(self, _sender=None) -> None:
+        """打开 Claude Code 配置编辑窗口（惰性导入，出错记入日志不影响状态灯）。"""
+        try:
+            if getattr(self, "_config", None) is None:
+                import config_window
+                self._config = config_window.ConfigController.alloc().init()
+            self._config.show()
         except Exception:
             import traceback
             traceback.print_exc(file=sys.stderr)

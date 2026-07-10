@@ -17,6 +17,33 @@ from datetime import datetime
 PROJECTS_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects")
 # cc-light 独有的状态事件（红灯时间线），与 hook.py 的 EVENTS_DIR 同路径。
 EVENTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "events")
+# 会话收藏（收藏星标），存在 data/favorites.json。
+FAV_PATH = os.path.join(os.path.dirname(EVENTS_DIR), "favorites.json")
+
+
+def load_favorites():
+    """读取收藏的 session_id 集合。"""
+    try:
+        with open(FAV_PATH, encoding="utf-8") as f:
+            return set(json.load(f).get("favorites", []))
+    except (OSError, ValueError):
+        return set()
+
+
+def toggle_favorite(session_id):
+    """切换某会话的收藏状态，返回切换后是否已收藏。"""
+    favs = load_favorites()
+    if session_id in favs:
+        favs.discard(session_id)
+    else:
+        favs.add(session_id)
+    try:
+        os.makedirs(os.path.dirname(FAV_PATH), exist_ok=True)
+        with open(FAV_PATH, "w", encoding="utf-8") as f:
+            json.dump({"favorites": sorted(favs)}, f)
+    except OSError:
+        pass
+    return session_id in favs
 
 # 会改动文件的工具：从其 tool_use 参数里提取文件路径，供任务级「文件改动」展示。
 _FILE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
