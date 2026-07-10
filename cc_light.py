@@ -100,8 +100,8 @@ class CCLight(rumps.App):
         self._sig = None  # 上一次菜单内容签名，内容没变就不重建下拉（避免打开菜单时闪烁）
         self._render([], time.time())
 
-    def _title(self, counts: dict) -> str:
-        """按当前模式生成菜单栏文字。
+    def _menubar_text(self, counts: dict) -> str:
+        """按当前模式生成菜单栏文字。方法名避开 rumps 内部的 self._title 属性，勿改回 _title。
 
         分状态计数：如 "🔴2 🟢1 ⚪3"；合并单灯：取最高优先级的一个灯（红 > 绿 > 灰）。
         """
@@ -119,7 +119,7 @@ class CCLight(rumps.App):
         counts = {"needs": 0, "running": 0, "idle": 0}
         for e in sessions:
             counts[_effective_state(e, now)] += 1
-        self.title = self._title(counts)
+        self.title = self._menubar_text(counts)
 
         # 下拉内容仅在「有会话状态变化」时才重建，避免菜单打开时被每 500ms 的重建打断。
         sig = tuple(

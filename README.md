@@ -30,42 +30,36 @@ Claude Code 的 Mac 菜单栏状态灯。灵感来自 Windows 版 [claude-code-t
 
 - Claude Code 的 hooks（`~/.claude/settings.json`）在事件发生时调用 `hook.py`，把该会话状态
   原子写入 `~/.claude/cc-light/status/<session_id>.json`。
-- `cc_light.py`（rumps 菜单栏程序）每 500ms 轮询这些文件，更新菜单栏图标与下拉列表。
+- `cc_light.py`（rumps 菜单栏程序）每 250ms 轮询这些文件，更新菜单栏图标与下拉列表。
 - 钩子用系统 `/usr/bin/python3` 跑（只用标准库，与 Anaconda / PATH 解耦，绝不阻断 Claude Code）；
   菜单栏程序需要 rumps。
 
-## 安装
+## 安装（一键）
 
 ```bash
-# 1. 装依赖（装进你的 anaconda python）
-pip3 install rumps
-
-# 2. hooks 已写入 ~/.claude/settings.json（本仓库随附的 settings 片段仅供参考）。
-#    改了 hooks 后需重启 Claude Code 会话才生效。
-
-# 3. 启动菜单栏灯
 cd ~/proj/cc-light
-./start.sh          # 后台常驻，日志见 cc-light.log
-./stop.sh           # 停止
+./install.sh
 ```
+
+`install.sh` 会自动：装 rumps 依赖、把 hooks 幂等合并进 `~/.claude/settings.json`、生成并加载
+一个 LaunchAgent（开机自启、崩溃自愈、装完立即启动）。装完菜单栏右上角就有圆点，之后再也不用手动
+启动。改了代码后**再跑一次 `./install.sh`** 即可重启用上新代码。
+
+> 分享给他人：把本目录拷过去 / clone，对方 `./install.sh` 即可（路径按其本机自动解析）。
+> 新增或改动 hooks 后，需重启对应的 Claude Code 会话才生效。
+
+## 日常操作
+
+- 临时退出：点菜单栏圆点 →「退出 cc-light」（干净退出，不会被自愈拉起）。
+- 退出后再启动 / 改代码后重启：`./install.sh`。
+- 卸载：`./uninstall.sh`（停止、移除自启、清掉本工具的 hooks 与状态文件，保留你其它配置）。
 
 ## 菜单栏不显示图标怎么办
 
-Anaconda 等非 framework 版 Python 跑菜单栏程序，有时图标不出现。解决办法：
+Anaconda 等非 framework 版 Python 跑菜单栏程序，有时图标不出现。装上 GUI 启动器再重装即可
+（`install.sh` 会自动优先用 `pythonw`）：
 
 ```bash
-# 安装 anaconda 的 GUI 启动器，得到 pythonw；start.sh 会自动优先用它
 conda install -y python.app
-./stop.sh && ./start.sh
+./install.sh
 ```
-
-## 开机自启（可选）
-
-把 `com.cc-light.plist` 复制到 `~/Library/LaunchAgents/` 并 `launchctl load` 即可（模板里已注明
-需要把路径改成本机绝对路径）。
-
-## 卸载
-
-- 停止：`./stop.sh`
-- 移除 hooks：编辑 `~/.claude/settings.json` 删掉 `hooks` 段
-- 删状态文件：`rm -rf ~/.claude/cc-light`
